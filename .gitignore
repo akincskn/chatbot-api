@@ -1,0 +1,43 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+*.code-workspace
+.classpath
+.project
+.settings/
+bin/
+
+# Spring Boot
+*.jar
+*.war
+*.ear
+spring-shell.log
+
+# Env & Secrets
+.env
+.env.*
+*.properties.local
+application-local.yml
+application-local.properties
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Maven Wrapper (keep the jar, ignore OS-specific scripts if needed)
+mvnw
+# mvnw.cmd intentionally kept for Windows builds

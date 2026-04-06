@@ -1,0 +1,220 @@
+# CHECKLIST.md — Chatbot API Implementation Plan
+
+## Faz 1: Proje Setup + Auth (Gün 1-2)
+
+### Setup
+- [ ] Spring Boot 3.x projesi oluştur (Spring Initializr: Web, JPA, Security, Validation, DevTools)
+- [ ] Maven dependencies ekle: postgresql, pgvector-hibernate, jjwt, pdfbox, jsoup, lombok
+- [ ] application.yml konfigürasyonu (Neon connection, JWT secret, CORS)
+- [ ] Paket yapısını oluştur (controller, service, repository, entity, dto, config, security, ai, rag, exception, util, mapper)
+- [ ] docs/ klasörünü proje root'una koy
+
+### Database
+- [ ] Neon'da pgvector extension etkinleştir: `CREATE EXTENSION IF NOT EXISTS vector;`
+- [ ] User entity + repository
+- [ ] JPA ddl-auto=update ile tabloları oluştur
+
+### Auth
+- [ ] SecurityConfig: JWT stateless session, CORS, endpoint security
+- [ ] JwtTokenProvider: token üretme, doğrulama, parse
+- [ ] JwtAuthenticationFilter: her request'te token kontrolü
+- [ ] UserDetailsServiceImpl: DB'den kullanıcı yükleme
+- [ ] AuthController: POST /register, POST /login
+- [ ] LoginRequest, RegisterRequest DTO'ları (@Valid)
+- [ ] AuthResponse DTO (token + user bilgisi)
+- [ ] GlobalExceptionHandler: 401, 403, 400, 404, 500
+
+### Test
+- [ ] Register → Login → Token al → Protected endpoint'e eriş
+
+---
+
+## Faz 2: Chatbot CRUD (Gün 3-4)
+
+### Entity + Repository
+- [ ] Chatbot entity (tüm alanlar, User ilişkisi)
+- [ ] ChatbotRepository (findByUserId, existsByIdAndUserId)
+
+### Service
+- [ ] ChatbotService: create, getAll, getById, update, delete
+- [ ] Ownership kontrolü: kullanıcı sadece kendi chatbot'una erişebilir
+- [ ] Credit kontrolü: create'te kredi düşür (atomic)
+
+### Controller + DTO
+- [ ] ChatbotController: GET, POST, PUT, DELETE endpoints
+- [ ] CreateChatbotRequest DTO (@Valid: name required, persona enum)
+- [ ] ChatbotResponse DTO
+- [ ] ChatbotMapper
+
+### Test
+- [ ] CRUD operasyonları çalışıyor
+- [ ] Farklı kullanıcı başka kullanıcının chatbot'una erişemiyor
+
+---
+
+## Faz 3: Döküman Upload + Processing (Gün 5-7)
+
+### Entity + Repository
+- [ ] Document entity
+- [ ] DocumentChunk entity (embedding VECTOR(384) column)
+- [ ] DocumentRepository, DocumentChunkRepository
+- [ ] Native query: findSimilarChunks (pgvector cosine distance)
+
+### Text Processing
+- [ ] TextSplitter service: recursive character splitting
+  - Chunk size: 500 token
+  - Overlap: 50 token
+  - Paragraph/sentence boundary awareness
+- [ ] PDF parser: PDFBox ile text çıkarma
+- [ ] URL parser: Jsoup ile HTML → text (10s timeout, SSRF koruması)
+- [ ] TextCleaner utility: gereksiz whitespace, special char temizleme
+
+### Embedding
+- [ ] HuggingFaceEmbeddingClient: HTTP request to Inference API
+  - Model: sentence-transformers/all-MiniLM-L6-v2
+  - Input: text → Output: float[384]
+  - Batch support (5 chunk per request)
+  - Retry + error handling
+
+### Document Service
+- [ ] DocumentService.processDocument():
+  1. Parse (PDF/URL/text)
+  2. Split into chunks
+  3. Generate embeddings
+  4. Save chunks with vectors
+  5. Update document status (ready/failed)
+- [ ] Async processing (@Async) — upload hemen döner, processing arka planda
+
+### Controller
+- [ ] DocumentController: POST /upload, GET /, DELETE /:id
+- [ ] Multipart file upload (PDF) + JSON body (URL/text)
+- [ ] UploadDocumentRequest DTO
+
+### Test
+- [ ] PDF upload → chunks oluştu → embeddings kaydedildi
+- [ ] URL scrape → chunks oluştu
+- [ ] Text input → chunks oluştu
+- [ ] Hatalı URL → graceful error
+
+---
+
+## Faz 4: RAG Chat Pipeline (Gün 8-10)
+
+### AI Clients
+- [ ] GroqClient: HTTP request to Groq API
+  - Model: llama-3.3-70b-versatile
+  - Streaming support (SSE)
+  - Error handling + timeout
+- [ ] GeminiClient: HTTP request to Gemini API
+  - Model: gemini-2.0-flash
+  - Fallback client
+- [ ] LlmService: Groq primary → Gemini fallback logic
+
+### RAG Pipeline
+- [ ] ContextBuilder: system prompt + chunks + history + question birleştir
+  - Token counting (approximate: words * 1.3)
+  - Sliding window for conversation history (son 5 mesaj)
+  - Context truncation if exceeds limit
+- [ ] RagPipeline.processQuery():
+  1. Embed query
+  2. Semantic search (top 5 chunks, min similarity 0.3)
+  3. Build context
+  4. Call LLM
+  5. Return response + source chunks
+- [ ] PromptBuilder: system prompt template
+  - Hallucination prevention: "Answer ONLY based on context"
+  - Source citation: "Reference the document when possible"
+  - Persona support: professional/friendly/casual tone
+
+### Chat Service
+- [ ] ChatService.processMessage():
+  1. Find or create conversation (session_id based)
+  2. Save user message
+  3. Run RAG pipeline
+  4. Save assistant message (with source_chunks)
+  5. Update conversation last_message_at
+  6. Return streaming response
+
+### Controller
+- [ ] ChatController:
+  - POST /api/chat/:chatbotId (JWT — owner test)
+  - POST /api/chat/public/:chatbotId (no JWT — embed widget)
+  - GET /api/chat/:chatbotId/conversations (JWT)
+  - GET /api/chat/conversation/:convId (JWT)
+- [ ] ChatMessageRequest DTO (message, sessionId)
+- [ ] ChatMessageResponse DTO (message, sources, conversationId)
+- [ ] SSE (Server-Sent Events) for streaming response
+
+### Test
+- [ ] Döküman yükle → Soru sor → Doğru cevap geldi
+- [ ] Conversation history korunuyor
+- [ ] İlgisiz soru → "I don't have information about that"
+- [ ] Groq hata → Gemini fallback çalışıyor
+- [ ] Public endpoint JWT olmadan çalışıyor
+
+---
+
+## Faz 5: Embed Script + Polish (Gün 11-13)
+
+### Embed Script
+- [ ] GET /embed.js endpoint'i
+  - JavaScript widget kodu döner
+  - data-chatbot-id attribute'ünden chatbot ID alır
+  - Sağ alta chat baloncuğu ekler
+  - Tıklayınca iframe veya shadow DOM chat penceresi açar
+  - /api/chat/public/:chatbotId endpoint'ine mesaj gönderir
+  - Streaming response gösterir
+  - Session ID localStorage'da saklar
+- [ ] GET /api/chatbots/:id/embed — embed kodu snippet'ı döner
+
+### Rate Limiting
+- [ ] Chat endpoint'ine IP bazlı rate limiting
+  - Public: 20 mesaj/dakika/IP
+  - Authenticated: 60 mesaj/dakika/user
+
+### CORS
+- [ ] Embed script için: tüm origin'lere izin ver (/api/chat/public/**)
+- [ ] Dashboard API için: sadece frontend URL
+
+### Analytics
+- [ ] Chatbot istatistikleri: total conversations, total messages
+- [ ] GET /api/chatbots/:id/stats endpoint
+
+### Polish
+- [ ] Tüm endpoint'lerde error handling kontrol
+- [ ] Unused import temizle
+- [ ] Logger ekle (SLF4J)
+- [ ] application.yml: production vs development profile
+- [ ] README.md
+
+---
+
+## Faz 6: Deploy (Gün 14)
+
+### Koyeb Deploy
+- [ ] Dockerfile oluştur (multi-stage build)
+- [ ] system.properties (Java 21)
+- [ ] Koyeb'de yeni servis oluştur (Git-driven)
+- [ ] Environment variables ayarla
+- [ ] Deploy et ve test et
+
+### Environment Variables
+```
+DATABASE_URL=postgresql://...@neon.tech/chatbotdb?sslmode=require
+JWT_SECRET=generated-secret
+GROQ_API_KEY=...
+GEMINI_API_KEY=...
+HUGGINGFACE_API_KEY=...
+FRONTEND_URL=https://chatbot-web.vercel.app
+```
+
+---
+
+## Son Kontroller
+- [ ] Tüm endpoint'ler auth kontrollü (public hariç)
+- [ ] Tüm input'lar validated
+- [ ] Error handling tutarlı
+- [ ] CORS doğru ayarlanmış
+- [ ] No hardcoded credentials
+- [ ] Build hatasız
+- [ ] README güncel

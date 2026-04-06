@@ -1,0 +1,20 @@
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/chatbotdb_test}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+
+jwt:
+  secret: test-secret-key-that-is-long-enough-for-hmac-sha256-algorithm
+  expiration-ms: 3600000
+
+app:
+  frontend-url: http://localhost:3000
+  groq:
+    api-key: test-key
+  gemini:
+    api-key: test-key
+  huggingface:
+    api-key: test-key

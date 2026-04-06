@@ -1,0 +1,58 @@
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/chatbotdb}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+    show-sql: false
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+server:
+  port: 8080
+
+jwt:
+  secret: ${JWT_SECRET:changeme-this-is-a-very-long-secret-key-for-development-only-please-change-in-prod}
+  expiration-ms: 86400000
+
+app:
+  groq:
+    api-key: ${GROQ_API_KEY:}
+    base-url: https://api.groq.com/openai/v1
+    model: llama-3.3-70b-versatile
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    base-url: https://generativelanguage.googleapis.com/v1beta
+    model: gemini-2.0-flash
+  huggingface:
+    api-key: ${HUGGINGFACE_API_KEY:}
+    model: sentence-transformers/all-MiniLM-L6-v2
+  frontend-url: ${FRONTEND_URL:http://localhost:3000}
+  api-base-url: ${API_BASE_URL:http://localhost:8080}
+
+logging:
+  level:
+    com.akincoskun.chatbotapi: INFO
+    org.springframework.security: WARN
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+logging:
+  level:
+    com.akincoskun.chatbotapi: WARN
+    root: WARN

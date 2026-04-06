@@ -1,0 +1,217 @@
+# DATABASE.md — AI Chatbot Platform
+
+## PostgreSQL + pgvector (Neon)
+
+### Extension
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+```
+
+## Entity-Relationship Diagram
+
+```
+users
+  │
+  ├──< chatbots
+  │       │
+  │       ├──< documents
+  │       │       │
+  │       │       └──< document_chunks (embedding VECTOR(384))
+  │       │
+  │       └──< conversations
+  │               │
+  │               └──< messages
+```
+
+## Tablolar
+
+### users
+```sql
+CREATE TABLE users (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    name VARCHAR(255),
+    google_id VARCHAR(255) UNIQUE,
+    credits INTEGER DEFAULT 3 NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+```
+
+**Neden:**
+- credits: Her kullanıcı 3 ücretsiz chatbot oluşturabilir
+- google_id: Google OAuth ile giriş yapanlar için
+- password_hash: Email/password ile giriş yapanlar için (BCrypt)
+
+### chatbots
+```sql
+CREATE TABLE chatbots (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    welcome_message TEXT DEFAULT 'Hi! How can I help you today?',
+    system_prompt TEXT DEFAULT 'You are a helpful assistant. Answer questions based ONLY on the provided context. If the answer is not found in the context, politely say you don''t have information about that topic.',
+    persona VARCHAR(50) DEFAULT 'professional',
+    primary_color VARCHAR(7) DEFAULT '#3B82F6',
+    status VARCHAR(20) DEFAULT 'active',
+    total_conversations INTEGER DEFAULT 0,
+    total_messages INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX idx_chatbots_user_id ON chatbots(user_id);
+```
+
+**Neden:**
+- system_prompt: Kullanıcı chatbot'un davranışını özelleştirebilir
+- persona: professional/friendly/casual — email tonu gibi
+- primary_color: Embed widget rengi
+- status: active/inactive — devre dışı bırakılabilir
+- total_conversations/messages: Dashboard istatistikleri için (denormalize — her sorguda count yapmamak için)
+
+### documents
+```sql
+CREATE TABLE documents (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    chatbot_id UUID NOT NULL REFERENCES chatbots(id) ON DELETE CASCADE,
+    filename VARCHAR(500) NOT NULL,
+    source_type VARCHAR(20) NOT NULL, -- 'pdf', 'url', 'text'
+    source_url TEXT, -- URL kaynaklı ise
+    original_content TEXT, -- Ham metin (debug için)
+    content_length INTEGER DEFAULT 0, -- Kelime sayısı
+    chunk_count INTEGER DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'processing', -- processing, ready, failed
+    error_message TEXT, -- Hata varsa
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX idx_documents_chatbot_id ON documents(chatbot_id);
+```
+
+**Neden:**
+- source_type: Parse stratejisini belirler (PDF → PDFBox, URL → Jsoup, TEXT → direkt)
+- original_content: Hata ayıklama ve yeniden işleme için saklanır
+- status: Async işleme — yükleme anında "processing", bitince "ready"
+- error_message: Parse veya embedding hatası olursa kullanıcıya gösterilir
+
+### document_chunks
+```sql
+CREATE TABLE document_chunks (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    embedding VECTOR(384), -- pgvector: all-MiniLM-L6-v2 output dimension
+    chunk_index INTEGER NOT NULL,
+    token_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX idx_chunks_document_id ON document_chunks(document_id);
+
+-- pgvector similarity search index (IVFFlat — approximate nearest neighbor)
+-- lists = sqrt(total_rows) genel kural, başlangıç için 100 yeterli
+CREATE INDEX idx_chunks_embedding ON document_chunks 
+USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+```
+
+**Neden:**
+- VECTOR(384): all-MiniLM-L6-v2 modeli 384 boyutlu vector üretir
+- chunk_index: Döküman içindeki sırayı korur (source gösteriminde önemli)
+- token_count: Context window hesaplamasında kullanılır
+- IVFFlat index: Exact search yerine approximate — çok daha hızlı, küçük doğruluk kaybı
+
+### conversations
+```sql
+CREATE TABLE conversations (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    chatbot_id UUID NOT NULL REFERENCES chatbots(id) ON DELETE CASCADE,
+    session_id VARCHAR(255) NOT NULL, -- Embed visitor tanımlama (anonymous)
+    visitor_ip VARCHAR(45), -- Analytics için (opsiyonel)
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+    last_message_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX idx_conversations_chatbot_id ON conversations(chatbot_id);
+CREATE INDEX idx_conversations_session_id ON conversations(session_id);
+```
+
+**Neden:**
+- session_id: Embed widget'tan gelen anonim kullanıcıları tanımlar (UUID, localStorage'da saklanır)
+- last_message_at: Dashboard'da "en son aktif" sıralaması için
+
+### messages
+```sql
+CREATE TABLE messages (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL, -- 'user' veya 'assistant'
+    content TEXT NOT NULL,
+    source_chunks JSONB, -- [{chunkId, content, similarity}] — hangi kaynaklardan geldi
+    token_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX idx_messages_conversation_id ON messages(conversation_id);
+```
+
+**Neden:**
+- role: 'user' veya 'assistant' — conversation history oluşturmak için
+- source_chunks: AI cevabının hangi döküman parçalarına dayandığını gösterir (transparency)
+- JSONB: Esnek yapı — chunk sayısı değişebilir
+
+## Önemli Sorgular
+
+### Semantic Similarity Search
+```sql
+-- Bir chatbot'un tüm chunk'larında en benzer 5'ini bul
+SELECT dc.id, dc.content, dc.chunk_index, d.filename,
+       1 - (dc.embedding <=> :queryVector) AS similarity
+FROM document_chunks dc
+JOIN documents d ON dc.document_id = d.id
+WHERE d.chatbot_id = :chatbotId
+  AND d.status = 'ready'
+  AND 1 - (dc.embedding <=> :queryVector) > 0.3
+ORDER BY dc.embedding <=> :queryVector
+LIMIT 5;
+```
+
+### Dashboard İstatistikleri
+```sql
+-- Kullanıcının chatbot'larını istatistiklerle getir
+SELECT c.*, 
+       COUNT(DISTINCT conv.id) AS conversation_count,
+       COUNT(DISTINCT d.id) AS document_count
+FROM chatbots c
+LEFT JOIN conversations conv ON c.id = conv.chatbot_id
+LEFT JOIN documents d ON c.id = d.chatbot_id
+WHERE c.user_id = :userId
+GROUP BY c.id
+ORDER BY c.created_at DESC;
+```
+
+## JPA Entity Notları
+
+### DocumentChunk entity'de pgvector
+```java
+// pgvector ile çalışmak için custom Hibernate type gerekiyor
+// hibernate-vector dependency kullan
+@Column(columnDefinition = "vector(384)")
+private float[] embedding;
+```
+
+### Cascade Delete Kuralları
+- User silinirse → tüm chatbot'ları silinir
+- Chatbot silinirse → tüm documents, chunks, conversations, messages silinir
+- Document silinirse → tüm chunks silinir
+- Conversation silinirse → tüm messages silinir
+
+## Migration Stratejisi
+- JPA `spring.jpa.hibernate.ddl-auto=update` ile başla (development)
+- Production'da Flyway veya Liquibase kullan
+- pgvector extension'ı manuel oluşturulmalı (JPA bunu yapmaz):
+  ```sql
+  CREATE EXTENSION IF NOT EXISTS vector;
+  ```
