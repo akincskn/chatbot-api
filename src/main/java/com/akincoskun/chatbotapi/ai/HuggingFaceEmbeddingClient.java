@@ -23,7 +23,7 @@ import java.util.Map;
 public class HuggingFaceEmbeddingClient {
 
     private static final String API_URL =
-            "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2";
+            "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2/pipeline/feature-extraction";
     private static final int BATCH_SIZE = 5;
     private static final int MAX_RETRIES = 3;
     private static final long RETRY_DELAY_MS = 2000;
