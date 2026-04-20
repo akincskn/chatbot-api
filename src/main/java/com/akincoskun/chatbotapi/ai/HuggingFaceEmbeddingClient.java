@@ -23,7 +23,7 @@ import java.util.Map;
 public class HuggingFaceEmbeddingClient {
 
     private static final String API_URL =
-            "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2";
+            "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2";
     private static final int BATCH_SIZE = 5;
     private static final int MAX_RETRIES = 3;
     private static final long RETRY_DELAY_MS = 2000;
@@ -89,6 +89,7 @@ public class HuggingFaceEmbeddingClient {
         Map<String, Object> body = Map.of("inputs", texts, "options", Map.of("wait_for_model", true));
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
 
+        log.info("HuggingFace API call → URL: {}", API_URL);
         ResponseEntity<String> response = restTemplate.exchange(API_URL, HttpMethod.POST, request, String.class);
 
         if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
