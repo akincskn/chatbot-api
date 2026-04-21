@@ -84,6 +84,7 @@ public class HuggingFaceEmbeddingClient {
     private List<float[]> callApi(List<String> texts) throws Exception {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
         headers.setBearerAuth(apiKey);
 
         Map<String, Object> body = Map.of("inputs", texts, "options", Map.of("wait_for_model", true));
