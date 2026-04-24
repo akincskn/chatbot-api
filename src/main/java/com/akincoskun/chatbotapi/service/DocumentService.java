@@ -128,8 +128,10 @@ public class DocumentService {
     }
 
     private void processContent(UUID docId, String rawContent) {
+        log.info("Processing document: {}", docId);
         String cleaned = TextCleaner.clean(rawContent);
         List<String> chunks = textSplitter.split(cleaned);
+        log.info("Document {} split into {} chunks (content length: {} chars)", docId, chunks.size(), cleaned.length());
 
         if (chunks.isEmpty()) {
             markFailed(docId, "No content could be extracted from the document");
@@ -147,11 +149,13 @@ public class DocumentService {
         doc.setChunkCount(chunks.size());
         doc.setStatus("ready");
         documentRepository.save(doc);
-        log.info("Document {} processed: {} chunks", docId, chunks.size());
+        log.info("Document {} processed successfully: {} chunks, status=ready", docId, chunks.size());
     }
 
     private void saveChunksWithEmbeddings(Document doc, List<String> chunks) {
+        log.info("Generating embeddings for {} chunks (documentId={})", chunks.size(), doc.getId());
         List<float[]> embeddings = embeddingService.embedBatch(chunks);
+        log.info("Received {} embeddings from HuggingFace", embeddings.size());
 
         for (int i = 0; i < chunks.size(); i++) {
             DocumentChunk chunk = DocumentChunk.builder()
@@ -161,9 +165,14 @@ public class DocumentService {
                     .tokenCount(textSplitter.estimateTokens(chunks.get(i)))
                     .build();
 
-            DocumentChunk saved = chunkRepository.save(chunk);
-            String vectorStr = embeddingService.toVectorString(embeddings.get(i));
+            // saveAndFlush ensures the INSERT is committed to DB before the native UPDATE runs.
+            // Without flush, @Modifying UPDATE executes while INSERT is still in JPA cache → 0 rows updated → embedding stays NULL.
+            DocumentChunk saved = chunkRepository.saveAndFlush(chunk);
+            float[] embedding = embeddings.get(i);
+            String vectorStr = embeddingService.toVectorString(embedding);
             chunkRepository.updateEmbedding(saved.getId().toString(), vectorStr);
+            log.info("Saved chunk {}/{} with embedding dimension: {} (chunkId={})",
+                    i + 1, chunks.size(), embedding.length, saved.getId());
         }
     }
 

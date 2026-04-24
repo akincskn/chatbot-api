@@ -22,7 +22,7 @@ import java.util.List;
 public class RagPipeline {
 
     private static final int TOP_K = 5;
-    private static final double MIN_SIMILARITY = 0.3;
+    private static final double MIN_SIMILARITY = 0.1;
 
     private final EmbeddingService embeddingService;
     private final DocumentChunkRepository chunkRepository;
@@ -38,25 +38,39 @@ public class RagPipeline {
      * @return pipeline yanıtı (LLM yanıtı + kullanılan chunk'lar)
      */
     public RagResponse process(Chatbot chatbot, String userQuestion, List<Message> recentMessages) {
+        log.info("RAG pipeline start — chatbotId={}, query=\"{}\"", chatbot.getId(), userQuestion);
+
         // 1. Sorgu embedding
         float[] queryVector = embeddingService.embed(userQuestion);
+        log.info("Query embedding dimension: {}", queryVector.length);
         String queryVectorStr = embeddingService.toVectorString(queryVector);
 
         // 2. Semantic search
         List<SimilarChunkResult> similarChunks = findSimilarChunks(chatbot.getId().toString(), queryVectorStr);
-        log.debug("Found {} similar chunks for chatbot {}", similarChunks.size(), chatbot.getId());
+        log.info("Found {} similar chunks for chatbot {} (minSimilarity={})", similarChunks.size(), chatbot.getId(), MIN_SIMILARITY);
+        for (int i = 0; i < similarChunks.size(); i++) {
+            SimilarChunkResult c = similarChunks.get(i);
+            log.info("  Chunk[{}]: similarity={} file=\"{}\" preview=\"{}\"",
+                    i, String.format("%.4f", c.similarity()), c.filename(),
+                    c.content().length() > 80 ? c.content().substring(0, 80) + "..." : c.content());
+        }
 
         // 3. Context oluştur
         List<LlmMessage> messages = contextBuilder.build(chatbot, similarChunks, recentMessages, userQuestion);
+        int contextLength = messages.stream().mapToInt(m -> m.content().length()).sum();
+        log.info("Context length: {} chars across {} messages", contextLength, messages.size());
 
         // 4. LLM çağrısı (Groq → Gemini fallback)
         String llmResponse = llmService.chat(messages);
+        log.info("LLM response length: {} chars", llmResponse.length());
 
         return new RagResponse(llmResponse, similarChunks);
     }
 
     private List<SimilarChunkResult> findSimilarChunks(String chatbotId, String queryVectorStr) {
+        log.info("Searching similar chunks — chatbotId={} limit={} minSim={}", chatbotId, TOP_K, MIN_SIMILARITY);
         List<Object[]> rows = chunkRepository.findSimilarChunks(chatbotId, queryVectorStr, TOP_K, MIN_SIMILARITY);
+        log.info("findSimilarChunks returned {} raw rows", rows.size());
 
         return rows.stream().map(row -> new SimilarChunkResult(
                 row[0] != null ? row[0].toString() : "",

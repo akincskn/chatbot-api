@@ -90,10 +90,13 @@ public class HuggingFaceEmbeddingClient {
         Map<String, Object> body = Map.of("inputs", texts, "options", Map.of("wait_for_model", true));
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
 
-        log.info("HuggingFace API call → URL: {}", API_URL);
+        log.info("HuggingFace API call → URL: {} texts={}", API_URL, texts.size());
         ResponseEntity<String> response = restTemplate.exchange(API_URL, HttpMethod.POST, request, String.class);
+        log.info("HuggingFace API response status: {} bodyLength: {}",
+                response.getStatusCode(), response.getBody() != null ? response.getBody().length() : 0);
 
         if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            log.error("HuggingFace API error: {} body: {}", response.getStatusCode(), response.getBody());
             throw new RuntimeException("HuggingFace API error: " + response.getStatusCode());
         }
 
@@ -106,13 +109,20 @@ public class HuggingFaceEmbeddingClient {
 
         for (int i = 0; i < expectedCount; i++) {
             JsonNode vectorNode = root.get(i);
+            if (vectorNode == null || !vectorNode.isArray()) {
+                throw new RuntimeException(
+                        "Unexpected HuggingFace response format at index " + i + ": " + (vectorNode != null ? vectorNode.getNodeType() : "null"));
+            }
             float[] vector = new float[vectorNode.size()];
             for (int j = 0; j < vectorNode.size(); j++) {
                 vector[j] = (float) vectorNode.get(j).asDouble();
             }
             embeddings.add(vector);
+            log.debug("Parsed embedding[{}]: dimension={}", i, vector.length);
         }
 
+        log.info("Parsed {} embeddings, dimension={}", embeddings.size(),
+                embeddings.isEmpty() ? 0 : embeddings.get(0).length);
         return embeddings;
     }
 

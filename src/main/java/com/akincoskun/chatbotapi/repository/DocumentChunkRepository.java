@@ -21,7 +21,7 @@ public interface DocumentChunkRepository extends JpaRepository<DocumentChunk, UU
      * @param id        chunk UUID
      * @param vectorStr pgvector string formatında vektör
      */
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = "UPDATE document_chunks SET embedding = CAST(:vectorStr AS vector) WHERE id = CAST(:id AS uuid)",
            nativeQuery = true)
     void updateEmbedding(@Param("id") String id, @Param("vectorStr") String vectorStr);
