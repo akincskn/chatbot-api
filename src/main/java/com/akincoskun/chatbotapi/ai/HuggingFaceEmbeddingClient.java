@@ -136,7 +136,9 @@ public class HuggingFaceEmbeddingClient {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < vector.length; i++) {
             if (i > 0) sb.append(",");
-            sb.append(vector[i]);
+            // Use explicit decimal format — Float.toString() can produce "1.0E-4"
+            // which some PostgreSQL drivers may reject in vector CAST context.
+            sb.append(String.format("%.8f", vector[i]));
         }
         sb.append("]");
         return sb.toString();

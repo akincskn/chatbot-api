@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
@@ -21,6 +22,7 @@ public interface DocumentChunkRepository extends JpaRepository<DocumentChunk, UU
      * @param id        chunk UUID
      * @param vectorStr pgvector string formatında vektör
      */
+    @Transactional
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = "UPDATE document_chunks SET embedding = CAST(:vectorStr AS vector) WHERE id = CAST(:id AS uuid)",
            nativeQuery = true)
