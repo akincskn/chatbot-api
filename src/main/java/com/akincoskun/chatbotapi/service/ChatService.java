@@ -121,9 +121,10 @@ public class ChatService {
     private ChatMessageResponse processMessage(Chatbot chatbot, String userMessage,
                                                String sessionId, String visitorIp) {
         // 1. Konuşmayı bul veya oluştur
+        boolean[] isNew = {false};
         Conversation conversation = conversationRepository
                 .findByChatbotIdAndSessionId(chatbot.getId(), sessionId)
-                .orElseGet(() -> createConversation(chatbot, sessionId, visitorIp));
+                .orElseGet(() -> { isNew[0] = true; return createConversation(chatbot, sessionId, visitorIp); });
 
         // 2. Kullanıcı mesajını kaydet
         saveMessage(conversation, "user", userMessage, null);
@@ -145,7 +146,7 @@ public class ChatService {
         // 7. Konuşma istatistiklerini güncelle
         conversation.setLastMessageAt(LocalDateTime.now());
         conversationRepository.save(conversation);
-        updateChatbotStats(chatbot);
+        updateChatbotStats(chatbot, isNew[0]);
 
         log.info("Chat processed for chatbot {} session {}", chatbot.getId(), sessionId);
         return new ChatMessageResponse(ragResponse.answer(), conversation.getId(), sessionId, sources);
@@ -172,8 +173,11 @@ public class ChatService {
         messageRepository.save(msg);
     }
 
-    private void updateChatbotStats(Chatbot chatbot) {
+    private void updateChatbotStats(Chatbot chatbot, boolean newConversation) {
         chatbot.setTotalMessages(chatbot.getTotalMessages() + 2);
+        if (newConversation) {
+            chatbot.setTotalConversations(chatbot.getTotalConversations() + 1);
+        }
         chatbotRepository.save(chatbot);
     }
 

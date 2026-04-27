@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -38,6 +39,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      * @param userId kullanıcı UUID
      * @return güncellenen satır sayısı (0 ise kredi yetersiz)
      */
+    @Transactional
     @Modifying
     @Query("UPDATE User u SET u.credits = u.credits - 1 WHERE u.id = :userId AND u.credits > 0")
     int decrementCredits(@Param("userId") UUID userId);

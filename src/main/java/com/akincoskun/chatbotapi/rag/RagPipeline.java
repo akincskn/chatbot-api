@@ -77,8 +77,15 @@ public class RagPipeline {
                 row[1] != null ? row[1].toString() : "",
                 row[2] != null ? ((Number) row[2]).intValue() : 0,
                 row[3] != null ? row[3].toString() : "",
-                row[4] != null ? ((Number) row[4]).doubleValue() : 0.0
+                row[4] != null ? sanitizeSimilarity(((Number) row[4]).doubleValue()) : 0.0
         )).toList();
+    }
+
+    // Zero-vector or degenerate embedding → cosine distance is undefined (NaN/Infinity).
+    // Clamp to [0,1] so downstream JSON serialization always produces a valid number.
+    private static double sanitizeSimilarity(double v) {
+        if (Double.isNaN(v) || Double.isInfinite(v)) return 0.0;
+        return Math.max(0.0, Math.min(1.0, v));
     }
 
     /**

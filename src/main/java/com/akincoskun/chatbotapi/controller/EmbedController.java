@@ -1,7 +1,6 @@
 package com.akincoskun.chatbotapi.controller;
 
-import com.akincoskun.chatbotapi.exception.ResourceNotFoundException;
-import com.akincoskun.chatbotapi.repository.ChatbotRepository;
+import com.akincoskun.chatbotapi.service.ChatbotService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
@@ -20,7 +19,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class EmbedController {
 
-    private final ChatbotRepository chatbotRepository;
+    private final ChatbotService chatbotService;
 
     @Value("${app.api-base-url}")
     private String apiBaseUrl;
@@ -48,9 +47,7 @@ public class EmbedController {
      */
     @GetMapping("/api/chatbots/{id}/embed")
     public ResponseEntity<Map<String, String>> getEmbedSnippet(@PathVariable UUID id) {
-        if (!chatbotRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Chatbot not found: " + id);
-        }
+        chatbotService.assertExists(id);
         String snippet = String.format(
                 "<script src=\"%s/embed.js\" data-chatbot-id=\"%s\"></script>",
                 apiBaseUrl, id);

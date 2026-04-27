@@ -151,6 +151,19 @@ public class ChatbotService {
                 chatbot.getTotalMessages(), documentCount, readyDocumentCount);
     }
 
+    /**
+     * Chatbot'un varlığını doğrular. Embed snippet gibi public context'lerde ownership kontrolü gerekmez.
+     *
+     * @param chatbotId chatbot UUID
+     * @throws ResourceNotFoundException chatbot bulunamazsa
+     */
+    @Transactional(readOnly = true)
+    public void assertExists(UUID chatbotId) {
+        if (!chatbotRepository.existsById(chatbotId)) {
+            throw new ResourceNotFoundException("Chatbot not found: " + chatbotId);
+        }
+    }
+
     private Chatbot loadOwnedChatbot(UUID chatbotId, String userEmail) {
         User user = loadUser(userEmail);
         if (!chatbotRepository.existsById(chatbotId)) {
